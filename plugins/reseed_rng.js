@@ -1,8 +1,7 @@
-const crypto = require('crypto');
+const crypto = require('node:crypto')
 
 exports.hook_init_child = function (next) {
-    const plugin = this;
-    Math.seedrandom(crypto.randomBytes(256).toString('hex'));
-    plugin.logdebug("reseeded rng");
-    next();
+    Math.seedrandom(crypto.randomBytes(256).toString('hex'))
+    this.logdebug('reseeded rng')
+    next()
 }

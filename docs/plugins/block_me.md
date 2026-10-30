@@ -1,5 +1,4 @@
-block\_me
-========
+# block_me
 
 This plugin allows you to configure an address which mail sent to will be
 parsed for a From: address in the body of the message, and will add that
@@ -10,11 +9,10 @@ particular mailbox to block them in the future.
 
 Note that this is a system-wide block, and not per-user. Be careful with this.
 
-Configuration
--------------
+## Configuration
 
-* `config/block_me.recipient` - a file containing the address to email to
+- `config/block_me.recipient` - a file containing the address to email to
   get something blocked. For example: **spam@domain.com**.
 
-* `config/block_me.senders` - a file containing a list of email addresses
+- `config/block_me.senders` - a file containing a list of email addresses
   that are allowed to email the dropbox.

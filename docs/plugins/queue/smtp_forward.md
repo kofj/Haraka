@@ -1,103 +1,99 @@
-queue/smtp\_forward
+# queue/smtp_forward
+
 ==================
 
-This plugin delivers to another mail server. This is a common setup when you
-want to have a mail server with a solid pedigree of outbound delivery to
-other hosts, and inbound delivery to users.
+This plugin delivers to another mail server. This is a common setup when you want to have a mail server with a solid pedigree of outbound delivery to other hosts, and inbound delivery to users.
 
-In comparison to `queue/smtp_proxy`, this plugin waits until queue time to
-attempt the ongoing connection. This can be a benefit in reducing connections
-to your inbound mail server when you have content filtering (such as
-spamassassin) enabled. A possible downside is that it also delays recipient
-validation that the ongoing mail server may provide until queue time.
+In comparison to `queue/smtp_proxy`, this plugin waits until queue time to attempt the ongoing connection. This can be a benefit in reducing connections to your inbound mail server when you have content filtering (such as spamassassin) enabled. A possible downside is that it also delays recipient validation that the ongoing mail server may provide until queue time.
 
-Configuration
--------------
+## Configuration
 
-* smtp\_forward.ini
+---
 
-  Configuration is stored in this file in the following keys:
+Configuration is stored in smtp_forward.ini in the following keys:
 
-  * enable\_outbound=[true]
+- enable_outbound=[true]
 
-    SMTP forward outbound messages (set to false to enable Haraka's separate
-    Outbound mail routing (MX based delivery)).
+  SMTP forward outbound messages (set to false to enable Haraka's separate Outbound mail routing (MX based delivery)).
 
-  * host=HOST
+- host=HOST
 
-    The host to connect to.
+  The host to connect to.
 
-  * port=PORT
+- port=PORT
 
-    The port to connect to. Default: 25
+  The port to connect to. Default: 25
 
-  * connect\_timeout=SECONDS
+- connect_timeout=SECONDS
 
-    The maximum amount of time to wait when creating a new connection
-    to the host.  Default: 30 seconds.
+  The maximum amount of time to wait when creating a new connection to the host. Default: 30 seconds.
 
-  * timeout=SECONDS
+- timeout=SECONDS
 
-    The amount of seconds to let a backend connection live idle in the
-    connection pool.  This should always be less than the global plugin
-    timeout, which should in turn be less than the connection timeout.
+  The amount of seconds to let a backend connection live idle in the connection pool. This should always be less than the global plugin timeout, which should in turn be less than the connection timeout.
 
-  * max\_connections=NUMBER
+- max_connections=NUMBER
 
-    Maximum number of connections at any given time. Default: 1000
+  Maximum number of connections at any given time. Default: 1000
 
-  * enable\_tls=[true]
+- enable_tls=[true]
 
-    Enable TLS with the forward host (if supported). TLS uses options
-    from the tls plugin. If key and cert are provided in the the outbound section of the tls plugin,
-    that certificate will be used as a TLS Client Certificate.
+  Enable opportunistic TLS with the forward host via `STARTTLS` (if the host advertises it). This plugin does not work with implicit SMTP over TLS.
 
-    This option controls the use of TLS via `STARTTLS`. This plugin does not work with
-    SMTP over TLS.
+- auth_type=[plain\|login]
 
-  * auth\_type=[plain\|login]
+  Enable PLAIN or LOGIN SMTP AUTH. This is required to enable AUTH.
 
-    Enable PLAIN or LOGIN SMTP AUTH.  This is required to enable AUTH.
+- auth_user=USERNAME
 
-  * auth\_user=USERNAME
+  SMTP AUTH username to use.
 
-    SMTP AUTH username to use.
+- auth_pass=PASSWORD
 
-  * auth\_pass=PASSWORD
+  SMTP AUTH password to use.
 
-    SMTP AUTH password to use.
+- queue
 
-  * queue
+  Which queue plugin to use. Default: undefined. The default bahavior is to use smtp_forward for inbound connections and outbound for relaying connections. This option is used for complex mail routes.
 
-    Which queue plugin to use. Default: undefined. The default bahavior is to
-    use smtp_forward for inbound connections and outbound for relaying
-    connections. This option is used for complex mail routes.
+- check_sender=false
 
-  * check_sender=false
+  Requires that sender domains defined in smtp_forward.ini (see Per-Domain below) have relaying privileges. This is a form of spoof prevention and assumes that any mail clients have relaying or AUTH privileges. This is usually the case.
 
-    Requires that sender domains defined in smtp_forward.ini (see Per-Domain below) have relaying privileges. This is a form of spoof prevention and assumes that any mail clients have relaying or AUTH privileges. This is usually the case.
+- check_recipient=false
 
-  * check_recipient=false
+  By default, Haraka accepts no emails until a recipient plugin has been configured to accept mails for a domain. The simplest common case is the in_host_list plugin with a list of domains in config/host_list. An alternative is to set `check_recipient=true` and list each domain in a definition block in smtp_forward.ini (see Per-Domain Configuration). An example for two domains:
 
-    By default, Haraka accepts no emails until a recipient plugin has been configured to accept mails for a domain. The simplest common case is the in_host_list plugin with a list of domains in config/host_list. An alternative is to set `check_recipient=true` and list each domain in a definition block in smtp_forward.ini (see Per-Domain Configuration). An example for two domains:
+  [example.com]
+  [example.net]
 
-    [example.com]
-    [example.net]
+- [tls]
+
+Client STARTTLS options are assembled by merging:
+
+1. `tls.ini` `[main]` — the global Haraka TLS config
+2. `smtp_forward.ini` `[tls]` — overrides. Anything set here wins.
+
+Example `smtp_forward.ini` `[tls]` section:
+
+    [tls]
+    rejectUnauthorized=true
+    minVersion=TLSv1.2
+    no_tls_hosts[]=10.0.0.5
+
+Per-domain `enable_tls=false` still disables STARTTLS for that backend. Per-domain TLS cipher/cert overrides are not currently supported.
+
+Changes to `tls.ini` require a Haraka restart to apply to the forward path; changes to `smtp_forward.ini` are picked up by the existing reload hook.
 
 # Per-Domain Configuration
 
-More specific forward routes for domains can be defined. The domain is
-chosen based on the value of the `domain_selector` config variable.
+More specific forward routes for domains can be defined. The domain is chosen based on the value of the `domain_selector` config variable.
 
-When `domain_selector` is set to `rcpt_to` (the default), more specific
-routes are only honored for SMTP connections with a single recipient or SMTP
-connections where every recipient host is identical.
+When `domain_selector` is set to `rcpt_to` (the default), more specific routes are only honored for SMTP connections with a single recipient or SMTP connections where every recipient host is identical.
 
-When `domain_selector` is set to `mail_from`, the domain of the MAIL FROM
-address is used.
+When `domain_selector` is set to `mail_from`, it first searches for configuration using the complete email address, falls back to the domain if not found, then to main configuration.
 
-enable\_outbound can be set or unset on a per-domain level to enable or disable
-forwarding for specific domains.
+enable_outbound can be set or unset on a per-domain level to enable or disable forwarding for specific domains.
 
     # default SMTP host
     host=1.2.3.4
@@ -106,6 +102,12 @@ forwarding for specific domains.
     # auth_user=pass
 
     [example1.com]
+    host=1.2.3.5
+    # auth_type=plain
+    # auth_user=user
+    # auth_pass=pass
+
+    [email@example1.com]
     host=1.2.3.5
     # auth_type=plain
     # auth_user=user
@@ -122,4 +124,4 @@ forwarding for specific domains.
 
 # Split host forward routing
 
-When an incoming email transaction has multiple recipients with different forward routes,  recipients to subsequent forward routes are deferred. Example: an incoming email transaction has recipients user@example1.com, user@example2.com, and user@example3.com. The first two recipients will be accepted (they share the same forward destination) and the latter will be deferred. It will arrive in a future delivery attempt by the remote.
+When an incoming email transaction has multiple recipients with different forward routes, recipients to subsequent forward routes are deferred. Example: an incoming email transaction has recipients user@example1.com, user@example2.com, and user@example3.com. The first two recipients will be accepted (they share the same forward destination) and the latter will be deferred. It will arrive in a future delivery attempt by the remote.

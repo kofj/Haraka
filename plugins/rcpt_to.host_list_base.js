@@ -1,79 +1,65 @@
-'use strict';
+'use strict'
 // Base class for plugins that use config/host_list
 
 exports.load_host_list = function () {
-    const plugin = this;
-
-    const lowered_list = {};  // assemble
-    const raw_list = plugin.config.get('host_list', 'list', () => {
-        plugin.load_host_list();
-    });
+    const lowered_list = Object.create(null)
+    const raw_list = this.config.get('host_list', 'list', () => {
+        this.load_host_list()
+    })
 
     for (const i in raw_list) {
-        lowered_list[raw_list[i].toLowerCase()] = true;
+        lowered_list[raw_list[i].toLowerCase()] = true
     }
 
-    plugin.host_list = lowered_list;
+    this.host_list = lowered_list
 }
 
 exports.load_host_list_regex = function () {
-    const plugin = this;
+    this.host_list_regex = this.config.get('host_list_regex', 'list', () => {
+        this.load_host_list_regex()
+    })
 
-    plugin.host_list_regex = plugin.config.get(
-        'host_list_regex',
-        'list',
-        () => { plugin.load_host_list_regex(); }
-    );
-
-    plugin.hl_re = new RegExp (`^(?:${
-        plugin.host_list_regex.join('|')})$`, 'i');
+    this.hl_re = new RegExp(`^(?:${this.host_list_regex.join('|')})$`, 'i')
 }
 
 exports.hook_mail = function (next, connection, params) {
-    const plugin = this;
-    const txn = connection.transaction;
-    if (!txn) { return; }
+    const txn = connection?.transaction
+    if (!txn) return
 
-    const email = params[0].address();
+    const email = params[0].address
     if (!email) {
-        txn.results.add(plugin, {skip: 'mail_from.null', emit: true});
-        return next();
+        txn.results.add(this, { skip: 'mail_from.null', emit: true })
+        return next()
     }
 
-    const domain = params[0].host.toLowerCase();
+    const domain = params[0].host.toLowerCase()
 
-    const anti_spoof = plugin.config.get('host_list.anti_spoof') || false;
+    const anti_spoof = this.config.get('host_list.anti_spoof') || false
 
-    if (plugin.in_host_list(domain) || plugin.in_host_regex(domain)) {
+    if (this.in_host_list(domain, connection) || this.in_host_regex(domain, connection)) {
         if (anti_spoof && !connection.relaying) {
-            txn.results.add(plugin, {fail: 'mail_from.anti_spoof'});
-            return next(DENY, `Mail from domain '${domain}' is not allowed from your host`);
+            txn.results.add(this, { fail: 'mail_from.anti_spoof' })
+            return next(DENY, `Mail from domain '${domain}' is not allowed from your host`)
         }
-        txn.results.add(plugin, {pass: 'mail_from'});
-        txn.notes.local_sender = true;
-        return next();
+        txn.results.add(this, { pass: 'mail_from' })
+        txn.notes.local_sender = true
+        return next()
     }
 
-    txn.results.add(plugin, {msg: 'mail_from!local'});
-    return next();
+    txn.results.add(this, { msg: 'mail_from!local' })
+    return next()
 }
 
-exports.in_host_list = function (domain) {
-    const plugin = this;
-    plugin.logdebug(`checking ${domain} in config/host_list`);
-    if (plugin.host_list[domain]) {
-        return true;
-    }
-    return false;
+exports.in_host_list = function (domain, connection) {
+    this.logdebug(connection, `checking ${domain} in config/host_list`)
+    return !!this.host_list[domain]
 }
 
-exports.in_host_regex = function (domain) {
-    const plugin = this;
-    if (!plugin.host_list_regex) return false;
-    if (!plugin.host_list_regex.length) return false;
+exports.in_host_regex = function (domain, connection) {
+    if (!this.host_list_regex) return false
+    if (!this.host_list_regex.length) return false
 
-    plugin.logdebug(`checking ${domain} against config/host_list_regex `);
+    this.logdebug(connection, `checking ${domain} against config/host_list_regex `)
 
-    if (plugin.hl_re.test(domain)) { return true; }
-    return false;
+    return !!this.hl_re.test(domain)
 }

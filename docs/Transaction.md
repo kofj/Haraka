@@ -1,165 +1,135 @@
-Transaction Object
-==================
+# Transaction Object
 
-An SMTP transaction is valid from MAIL FROM time until RSET or "final-dot".
+An SMTP transaction begins at `MAIL FROM` and ends at `RSET` or end-of-data (the "final dot"). A connection can carry multiple transactions; the current one is available as `connection.transaction`.
 
-API
----
+## Properties
 
-* transaction.uuid
+### transaction.uuid
 
-A unique UUID for this transaction. Is equal to the connection.uuid + '.N'
-where N increments for each transaction on this connection.
+A unique UUID for this transaction, of the form `<connection.uuid>.N`, where `N` increments per transaction on the connection.
 
-* transaction.mail\_from
+### transaction.mail_from
 
-The value of the MAIL FROM command as an `Address`[1] object.
+The `MAIL FROM` argument as an [`Address`][address] object.
 
-* transaction.rcpt\_to
+### transaction.rcpt_to
 
-An Array of `Address`[1] objects of recipients from the RCPT TO command.
+An array of [`Address`][address] objects, one per accepted `RCPT TO`.
 
-* transaction.message\_stream
+### transaction.header
 
-A node.js Readable Stream object for the message.
+The parsed message header. See [haraka-email-message → Header](https://github.com/haraka/email-message#header).
 
-You use it like this:
+### transaction.body
 
-    transaction.message_stream.pipe(WritableStream, options)
+The parsed message body, available only when `parse_body` is `true`. See [haraka-email-message → Body](https://github.com/haraka/email-message#body).
 
-Where WritableStream is a node.js Writable Stream object such as a
-net.socket, fs.writableStream, process.stdout/stderr or custom stream.
+### transaction.message_stream
 
-The options argument should be an object that overrides the following
-properties:
+A Node.js `Readable` stream for the message (headers + body). Pipe it into any `Writable` — a socket, file, stdout, or your own stream:
 
-    * line_endings (default: "\r\n")
-    * dot_stuffing (default: false)
-    * ending_dot   (default: false)
-    * end          (default: true)
-    * buffer_size  (default: 65535)
-    * clamd_style  (default: false)
+```js
+transaction.message_stream.pipe(writable, options)
+```
 
-e.g.
+`options` may override:
 
-    transaction.message_stream.pipe(socket, { dot_stuffing: true, ending_dot: true });
+| Option         | Default  | Description |
+| -------------- | -------- | --- |
+| `line_endings` | `"\r\n"` | newline sequence |
+| `dot_stuffed`  | `true`   | emit SMTP dot-stuffed output |
+| `ending_dot`   | `false`  | terminate with `.\r\n` (SMTP end-of-data) |
+| `end`          | `true`   | call `.end()` on the writable when finished |
+| `buffer_size`  | `65535`  | internal buffer size |
+| `clamd_style`  | `false`  | ClamAV CLAMSCAN-INSTREAM framing |
 
-* transaction.data\_bytes
+```js
+transaction.message_stream.pipe(socket, { ending_dot: true })
+```
 
-The number of bytes in the email after DATA.
+### transaction.data_bytes
 
-* transaction.add\_data(line)
+Number of bytes received during `DATA`.
 
-Adds a line of data to the email. Note this is RAW email - it isn't useful
-for adding banners to the email.
+### transaction.parse_body
 
-* transaction.notes
+`false` by default. Set to `true` (in `hook_data` or earlier) to enable MIME body parsing, after which `transaction.body` becomes available. `attachment_hooks()`, `set_banner()`, and `add_body_filter()` set this automatically.
 
-A safe place to store transaction specific values. See also [haraka-results](https://github.com/haraka/haraka-results) and [haraka-notes](https://github.com/haraka/haraka-notes).
+### transaction.discard_data
 
-* transaction.add\_leading\_header(key, value)
+Set to `true` to drop the raw message as it arrives instead of buffering it in `message_stream`. The parsed body and attachments are still available when `parse_body` is `true`. Useful for plugins that only need attachments or text without retaining the whole message.
 
-Adds a header to the top of the header list.  This should only be used in
-very specific cases.  Most people will want to use `add_header()` instead.
+### transaction.notes
 
-* transaction.add\_header(key, value)
+A `haraka-notes` instance scoped to this transaction. Use it to pass state between hooks; for structured per-test output prefer `transaction.results`. See [haraka-notes](https://github.com/haraka/haraka-notes).
 
-Adds a header to the email.
+`transaction.notes.skip_plugins` is honoured by the plugin runner — push plugin names into it to bypass them for the remainder of the transaction.
 
-* transaction.remove\_header(key)
+### transaction.results
 
-Deletes a header from the email.
+Structured store for plugin results. See [haraka-results](https://github.com/haraka/haraka-results).
 
-* transaction.header
+### transaction.rcpt_count
 
-The header of the email. See `Header Object`.
+Per-disposition counters (`accept`, `tempfail`, `reject`) tracking recipients in this transaction.
 
-* transaction.parse\_body = true|false [default: false]
+### transaction.mime_part_count
 
-Set to `true` to enable parsing of the mail body. Make sure you set this in
-hook\_data or before.
+Number of MIME parts seen so far (when `parse_body` is enabled).
 
-* transaction.body
+### transaction.encoding
 
-The body of the email if you set `parse_body` above. See `Body Object`.
+Character encoding used to convert incoming bytes to strings. Defaults to `'utf8'`.
 
-* transaction.attachment\_hooks(start)
+## Methods
 
-Sets a callback for when we see an attachment if `parse_body` has been set.
+### transaction.add_header(key, value)
 
-The `start` event will receive `(content_type, filename, body, stream)` as
-parameters.
+Append a header to the message.
 
-The stream is a `ReadableStream` - see http://nodejs.org/api/stream.html for
-details on how this works.
+### transaction.add_leading_header(key, value)
 
-If you set stream.connection then the stream will apply backpressure to the
-connection, allowing you to process attachments before the connection has
-ended. Here is an example which stores attachments in temporary files using
-the `tmp` library from npm and tells us the size of the file:
+Prepend a header to the message. Most plugins want `add_header()`; use this only when ordering matters (e.g. `Received:` chains).
 
-    exports.hook_data = function (next, connection) {
-        // enable mail body parsing
-        connection.transaction.parse_body = true;
-        connection.transaction.attachment_hooks(
-            function (ct, fn, body, stream) {
-                start_att(connection, ct, fn, body, stream)
-            }
-        );
-        next();
-    }
+### transaction.remove_header(key)
 
-    function start_att (connection, ct, fn, body, stream) {
-        connection.loginfo("Got attachment: " + ct + ", " + fn + " for user id: " + connection.transaction.notes.hubdoc_user.email);
-        connection.transaction.notes.attachment_count++;
+Remove all headers with `key`.
 
-        stream.connection = connection; // Allow backpressure
-        stream.pause();
+### transaction.add_data(line)
 
-        var tmp = require('tmp');
+Append a raw line to the message. The input must already be in SMTP wire format (CRLF newlines, dot-stuffed). Not the right tool for adding banners or transforming body parts — see `set_banner()` and `add_body_filter()`.
 
-        tmp.file(function (err, path, fd) {
-            connection.loginfo("Got tempfile: " + path + " (" + fd + ")");
-            var ws = fs.createWriteStream(path);
-            stream.pipe(ws);
-            stream.resume();
-            ws.on('close', function () {
-                connection.loginfo("End of stream reached");
-                fs.fstat(fd, function (err, stats) {
-                    connection.loginfo("Got data of length: " + stats.size);
-                    // Close the tmp file descriptor
-                    fs.close(fd, function(){});
-                });
-            });
-        });
-    }
+### transaction.attachment_hooks(start)
 
-* transaction.discard\_data = true|false [default: false]
+Register a callback fired for each attachment. `start` is called with `(content_type, filename, body, stream)`; `stream` is a Node.js `Readable`. Setting `stream.connection = connection` applies backpressure to the SMTP connection so attachments can be processed before the message ends.
 
-Set this flag to true to discard all data as it arrives and not store in
-memory or on disk (in the message\_stream property). You can still access
-the attachments and body if you set parse\_body to true. This is useful
-for systems which do not need the full email, just the attachments or
-mail text.
+```js
+exports.hook_data = (next, connection) => {
+    connection.transaction.attachment_hooks((ct, fn, body, stream) => {
+        start_att(connection, ct, fn, body, stream)
+    })
+    next()
+}
 
-* transaction.set\_banner(text, html)
+function start_att(connection, ct, fn, body, stream) {
+    connection.loginfo(`attachment: ${ct} ${fn}`)
+    stream.connection = connection // enable backpressure
+    stream.pause()
 
-Sets a banner to be added to the end of the email. If the html part is not
-given (optional) then the text part will have each line ending replaced with
-`<br/>` when being inserted into HTML parts.
+    require('node:tmp').file((err, path, fd) => {
+        const ws = require('node:fs').createWriteStream(path)
+        stream.pipe(ws)
+        stream.resume()
+    })
+}
+```
 
-* transaction.add\_body\_filter(ct_match, filter)
+### transaction.set_banner(text, html)
 
-Adds a filter to be applied to body parts in the email.  ct\_match should be a
-regular expression to match against the full content-type line, or a string to
-match at the start, e.g. `/^text\/html/` or `'text/plain'`.  filter will be
-called when each body part matching ct_match is complete.  It receives three
-parameters, the content-type line, the encoding name, and a buffer with the
-full body part.  It should return a buffer with the desired contents of the
-body in the same encoding.
+Append a banner to the end of the message. If `html` is omitted, each newline in `text` is replaced with `<br/>\n` when inserted into HTML parts.
 
-* transaction.results
+### transaction.add_body_filter(ct_match, filter)
 
-Store results of processing in a structured format. See [docs/Results](http://haraka.github.io/manual/Results.html)
+Register a filter applied to body parts. `ct_match` is either a regex matched against the content-type line, or a string matched as a prefix (e.g. `/^text\/html/` or `'text/plain'`). `filter` receives `(content_type, encoding, buffer)` and must return a `Buffer` with the replacement body (in the same encoding).
 
-[1]: `Address` objects are address-rfc2821 objects. See https://github.com/haraka/node-address-rfc2821
+[address]: https://github.com/haraka/email-address
